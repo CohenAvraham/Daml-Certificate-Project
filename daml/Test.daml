@@ -1,0 +1,87 @@
+module Test where
+
+import Daml.Script
+import Main
+import Setup
+
+testApprovedFlow : Script ()
+testApprovedFlow = script do
+
+  environmentParties@EnvironmentParties{..} <- setupParties
+
+  talentPropodalId <- submit talent do
+    createCmd TalentIntroductionProposal with
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+      talentRecruiter = recruiter
+      status = Applied
+      feedback = ""
+      ..
+
+  recruiterProposalId <- submit recruiter do
+    exerciseCmd talentPropodalId ApproveProposal with
+      inspector
+      additionalInfo = "Looks great for the academy"
+
+  needMoreInfoId <- submit inspector do
+    exerciseCmd recruiterProposalId RequestMoreInfo
+      with 
+        feedback = "What is your special talent?"
+
+  revisedProposalId <- submit recruiter do
+    exerciseCmd needMoreInfoId ReviseProposal with
+      requestor = recruiter 
+      feedback = "Can hold my breath under the water for 4 minutes"
+
+  talentId <- submit inspector do
+    exerciseCmd revisedProposalId Approve 
+      with
+        feedback = "This is fantastic"
+
+  pure ()
+
+
+testRejectedFlow : Script ()
+testRejectedFlow = script do
+
+  environmentParties@EnvironmentParties{..} <- setupParties
+
+  talentPropodalId <- submit talent do
+    createCmd TalentIntroductionProposal with
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+      talentRecruiter = recruiter
+      status = Applied
+      feedback = ""
+      ..
+
+  recruiterProposalId <- submit recruiter do
+    exerciseCmd talentPropodalId ApproveProposal with
+      inspector
+      additionalInfo = "Looks great for the academy"
+
+  needMoreInfoId <- submit inspector do
+    exerciseCmd recruiterProposalId RequestMoreInfo
+      with 
+        feedback = "What is your special talent?"
+
+  revisedProposalId <- submit recruiter do
+    exerciseCmd needMoreInfoId ReviseProposal with
+      requestor = recruiter 
+      feedback = "Can hold my breath under the water for 4 minutes"
+
+  talentId <- submit inspector do
+    exerciseCmd revisedProposalId RejectApplicant 
+      with
+        feedback = "This is not good enough"
+
+  pure ()
+  
