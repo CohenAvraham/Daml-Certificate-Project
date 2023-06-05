@@ -1,0 +1,160 @@
+module Main where
+
+type TalentRecruiterProposalId = ContractId TalentRecruiterProposal
+type TalentIntroductionProposalId = ContractId TalentIntroductionProposal
+type TalentId = ContractId Talent
+
+data ProposalStatus 
+  = Applied
+  | NeedMoreInfo
+  | Revised
+  | Rejected
+  | Approved
+  deriving (Eq, Show)
+
+data TalentInfo = TalentInfo
+  with
+    applicant : Party
+    firstName : Text
+    lastName : Text
+    age : Int
+    additionalInfo : [Text]
+
+  deriving (Eq, Show)
+
+isProposalFinalized : ProposalStatus -> Bool
+isProposalFinalized status = ((status /= Approved) || (status /= Rejected))
+
+template TalentIntroductionProposal
+  with
+    talentInfo : TalentInfo
+    talentRecruiter : Party
+    status : ProposalStatus
+    feedback : Text
+  where
+    signatory talentInfo.applicant
+    observer talentRecruiter
+    
+    key (talentInfo.applicant, talentInfo) : (Party, TalentInfo)
+    maintainer key._1
+
+    ensure (talentInfo.firstName /= "") && (talentInfo.age >= 18)
+
+    choice RejectIntroductionProposal : TalentIntroductionProposalId
+      with  
+        reason : Text
+      controller talentRecruiter
+        do
+          assertMsg "The proposal cannot be rejected anymore" (status == Applied)
+          create this with
+            status = Rejected
+            feedback = reason
+
+    choice ApproveProposal : TalentRecruiterProposalId
+      with
+        inspector : Party
+        additionalInfo : Text
+      controller talentRecruiter
+        do
+          assertMsg "Cannot approve a proposal which is not in 'Applied' Status" (status == Applied)
+
+          create this with
+            status = Approved
+            feedback = additionalInfo
+            
+          create TalentRecruiterProposal with
+            status = Applied
+            notes = []
+            ..
+
+    choice CancelIntroduction : ()
+      controller talentInfo.applicant
+        do
+          return ()
+
+template TalentRecruiterProposal 
+  with
+    talentRecruiter : Party
+    inspector : Party
+    talentInfo : TalentInfo
+    status : ProposalStatus
+    notes : [Text]
+
+  where
+    signatory talentRecruiter, talentInfo.applicant
+    observer inspector
+
+    key (talentRecruiter, talentInfo) : (Party, TalentInfo)
+    maintainer key._1
+
+    ensure (talentInfo.firstName /= "") && (talentInfo.age >= 18)
+
+    choice CancelProposal : ()
+      with  
+        requestor : Party
+      controller requestor
+        do
+          assertMsg "You are not authorized to cancel the proposal" ((requestor == talentRecruiter) || (requestor == talentInfo.applicant))
+          return ()
+
+    choice Approve : TalentId
+      with
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "You cannot approve the proposal at this time" (isProposalFinalized status)
+          create this
+            with
+              notes = feedback :: notes
+              status = Approved
+
+          create Talent with ..
+
+    choice RejectApplicant : TalentRecruiterProposalId
+      with 
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "You cannot reject a proposal that was already approved" (isProposalFinalized status)
+          create this
+            with
+              notes = feedback :: notes
+              status = Rejected
+
+
+    choice RequestMoreInfo : TalentRecruiterProposalId
+      with
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "The porposal cannot be revised anymore" (isProposalFinalized status)
+
+          create this 
+            with
+              notes = feedback :: notes
+              status = NeedMoreInfo
+
+    choice ReviseProposal : TalentRecruiterProposalId
+      with
+        requestor : Party
+        feedback : Text
+      controller requestor
+        do
+          assertMsg "The porposal cannot be revised anymore" (isProposalFinalized status)
+          assertMsg "You are not authorized to revise this proposal" ((requestor == talentRecruiter) || (requestor == talentInfo.applicant))
+          create this 
+            with
+              notes = feedback :: notes
+              status = Revised
+
+
+template Talent
+  with
+    inspector : Party
+    talentInfo : TalentInfo
+  where
+    signatory inspector, talentInfo.applicant
+
+    key (inspector, talentInfo) : (Party, TalentInfo)    
+    maintainer key._1
+    
