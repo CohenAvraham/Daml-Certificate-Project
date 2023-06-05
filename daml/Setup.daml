@@ -1,0 +1,47 @@
+module Setup where
+
+import Daml.Script
+import Main
+
+data EnvironmentParties = EnvironmentParties with
+    recruiter: Party
+    inspector: Party
+    talent: Party
+
+
+setupParties : Script EnvironmentParties
+setupParties = do
+  recruiter <- allocatePartyWithHint "Recruiter" (PartyIdHint "Recruiter")
+  inspector <- allocatePartyWithHint "Inspector" (PartyIdHint "Inspector")
+  talent <- allocatePartyWithHint "Talent" (PartyIdHint "Talent")
+
+  recruiterId <- validateUserId "recruiter"
+  inspectorId <- validateUserId "inspector"
+  talentId <- validateUserId "talent"
+
+  createUser (User recruiterId (Some recruiter)) [CanActAs recruiter]
+  createUser (User inspectorId (Some inspector)) [CanActAs inspector]
+  createUser (User talentId (Some talent)) [CanActAs talent]
+  
+  return EnvironmentParties with ..
+
+initSetup : Script ()
+initSetup = script do
+
+  environmentParties@EnvironmentParties{..} <- setupParties
+
+  submit talent do
+    createCmd TalentIntroductionProposal with
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+      talentRecruiter = recruiter
+      status = Applied
+      feedback = ""
+      ..
+
+  return ()
+  
