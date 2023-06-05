@@ -2,6 +2,7 @@ sdk-version: 2.5.0
 name: daml-certificate-exam
 source: daml
 version: 0.0.1
+init-script: Setup:initSetup
 dependencies:
   - daml-prim
   - daml-stdlib
