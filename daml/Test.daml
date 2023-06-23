@@ -4,6 +4,98 @@ import Daml.Script
 import Main
 import Setup
 
+import DA.Either
+import DA.List
+
+testUnHappyTalentProposal : Script ()
+testUnHappyTalentProposal = script do
+  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
+
+  -- only students can propose themselves as talents
+  submitMustFail manager do
+    exerciseCmd institution CreateNewTalentProposal with
+      student = manager
+      talentRecruiter = recruiter
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+                     capabilities = TalentCapabilities with
+                                      canSwim = True
+                                      canDive = False
+                                      canHandstand = True
+                                      canWalkingOnHands = False
+                                      canRopeJump = True
+  pure ()
+
+
+testUnHappyRecruiterReview : Script ()
+testUnHappyRecruiterReview = script do
+  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
+
+  proposalCid <- submit talent do
+    exerciseCmd institution CreateNewTalentProposal with
+      student = talent
+      talentRecruiter = recruiter
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+                     capabilities = TalentCapabilities with
+                                      canSwim = True
+                                      canDive = False
+                                      canHandstand = True
+                                      canWalkingOnHands = False
+                                      canRopeJump = True
+
+  -- the recruiter is assigning the wrong recruiter to review the application
+  submitMustFail recruiter do
+    exerciseCmd institution ReviewNewTalentProposal with
+      recruiter = recruiter2
+      ..
+  pure ()
+
+
+testUnHappyWrongInspectorReview : Script ()
+testUnHappyWrongInspectorReview = script do
+  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
+
+  proposalCid <- submit talent do
+    exerciseCmd institution CreateNewTalentProposal with
+      student = talent
+      talentRecruiter = recruiter
+      talentInfo = TalentInfo with
+                     applicant = talent
+                     firstName = "Daml"
+                     lastName = "Certificate"
+                     age = 20
+                     additionalInfo = []
+                     capabilities = TalentCapabilities with
+                                      canSwim = True
+                                      canDive = False
+                                      canHandstand = True
+                                      canWalkingOnHands = False
+                                      canRopeJump = True
+
+  eitherProposalCid <- submit recruiter do
+    exerciseCmd institution ReviewNewTalentProposal with
+      recruiter = recruiter
+      ..
+
+  let recruiterProposalCid = head $ rights [eitherProposalCid]
+
+  -- inspector can reject an application but cannot cancel
+  submitMustFail inspector do
+    exerciseCmd recruiterProposalCid CancelProposal with
+      requestor = inspector
+
+  pure ()
+
+
 testApprovedFlow : Script ()
 testApprovedFlow = script do
 
@@ -17,6 +109,12 @@ testApprovedFlow = script do
                      lastName = "Certificate"
                      age = 20
                      additionalInfo = []
+                     capabilities = TalentCapabilities with
+                                      canSwim = True
+                                      canDive = False
+                                      canHandstand = True
+                                      canWalkingOnHands = False
+                                      canRopeJump = True
       talentRecruiter = recruiter
       status = Applied
       feedback = ""
@@ -25,20 +123,19 @@ testApprovedFlow = script do
   recruiterProposalId <- submit recruiter do
     exerciseCmd talentPropodalId ApproveProposal with
       inspector
-      additionalInfo = "Looks great for the academy"
 
   needMoreInfoId <- submit inspector do
     exerciseCmd recruiterProposalId RequestMoreInfo
-      with 
+      with
         feedback = "What is your special talent?"
 
   revisedProposalId <- submit recruiter do
     exerciseCmd needMoreInfoId ReviseProposal with
-      requestor = recruiter 
+      requestor = recruiter
       feedback = "Can hold my breath under the water for 4 minutes"
 
   talentId <- submit inspector do
-    exerciseCmd revisedProposalId Approve 
+    exerciseCmd revisedProposalId Approve
       with
         feedback = "This is fantastic"
 
@@ -58,6 +155,12 @@ testRejectedFlow = script do
                      lastName = "Certificate"
                      age = 20
                      additionalInfo = []
+                     capabilities = TalentCapabilities with
+                        canSwim = True
+                        canDive = False
+                        canHandstand = True
+                        canWalkingOnHands = False
+                        canRopeJump = True
       talentRecruiter = recruiter
       status = Applied
       feedback = ""
@@ -66,22 +169,21 @@ testRejectedFlow = script do
   recruiterProposalId <- submit recruiter do
     exerciseCmd talentPropodalId ApproveProposal with
       inspector
-      additionalInfo = "Looks great for the academy"
 
   needMoreInfoId <- submit inspector do
     exerciseCmd recruiterProposalId RequestMoreInfo
-      with 
+      with
         feedback = "What is your special talent?"
 
   revisedProposalId <- submit recruiter do
     exerciseCmd needMoreInfoId ReviseProposal with
-      requestor = recruiter 
+      requestor = recruiter
       feedback = "Can hold my breath under the water for 4 minutes"
 
   talentId <- submit inspector do
-    exerciseCmd revisedProposalId RejectApplicant 
+    exerciseCmd revisedProposalId RejectApplicant
       with
         feedback = "This is not good enough"
 
   pure ()
-  
+
