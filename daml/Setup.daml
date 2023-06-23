@@ -42,7 +42,7 @@ initSetup = script do
     createCmd Institution with
       students = [talent]
       inspectors = [inspector]
-      recruiters = [recruiter]
+      recruiters = [recruiter, recruiter2]
       ..
 
   return (institution, environmentParties)
