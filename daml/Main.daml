@@ -1,189 +1,217 @@
-module Test where
+module Main where
 
-import Daml.Script
-import Main
-import Setup
+type TalentRecruiterProposalId = ContractId TalentRecruiterProposal
+type TalentIntroductionProposalId = ContractId TalentIntroductionProposal
+type TalentId = ContractId Talent
 
-import DA.Either
-import DA.List
+data ProposalStatus
+  = Applied
+  | NeedMoreInfo
+  | Revised
+  | Rejected
+  | Approved
+  deriving (Eq, Show)
 
-testUnHappyTalentProposal : Script ()
-testUnHappyTalentProposal = script do
-  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
+data TalentCapabilities = TalentCapabilities
+  with
+    canDive : Bool
+    canSwim : Bool
+    canHandstand : Bool
+    canWalkingOnHands : Bool
+    canRopeJump : Bool
+  deriving (Eq, Show)
 
-  -- only students can propose themselves as talents
-  submitMustFail manager do
-    exerciseCmd institution CreateNewTalentProposal with
-      student = manager
-      talentRecruiter = recruiter
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-                     capabilities = TalentCapabilities with
-                                      canSwim = True
-                                      canDive = False
-                                      canHandstand = True
-                                      canWalkingOnHands = False
-                                      canRopeJump = True
-  pure ()
+data TalentInfo = TalentInfo
+  with
+    applicant : Party
+    firstName : Text
+    lastName : Text
+    age : Int
+    capabilities : TalentCapabilities
+    additionalInfo : [Text]
+  deriving (Eq, Show)
 
+isProposalFinalized : ProposalStatus -> Bool
+isProposalFinalized status = ((status /= Approved) && (status /= Rejected))
 
-testUnHappyRecruiterReview : Script ()
-testUnHappyRecruiterReview = script do
-  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
+template Institution
+  with
+    manager : Party
+    recruiters : [Party]
+    inspectors : [Party]
+    students : [Party]
+  where
+    signatory manager
+    observer recruiters, inspectors, students
 
-  proposalCid <- submit talent do
-    exerciseCmd institution CreateNewTalentProposal with
-      student = talent
-      talentRecruiter = recruiter
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-                     capabilities = TalentCapabilities with
-                                      canSwim = True
-                                      canDive = False
-                                      canHandstand = True
-                                      canWalkingOnHands = False
-                                      canRopeJump = True
-
-  -- the recruiter is assigning the wrong recruiter to review the application
-  submitMustFail recruiter do
-    exerciseCmd institution ReviewNewTalentProposal with
-      recruiter = recruiter2
-      ..
-  pure ()
-
-
-testUnHappyWrongInspectorReview : Script ()
-testUnHappyWrongInspectorReview = script do
-  (institution, environmentParties@EnvironmentParties{..}) <- initSetup
-
-  proposalCid <- submit talent do
-    exerciseCmd institution CreateNewTalentProposal with
-      student = talent
-      talentRecruiter = recruiter
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-                     capabilities = TalentCapabilities with
-                                      canSwim = True
-                                      canDive = False
-                                      canHandstand = True
-                                      canWalkingOnHands = False
-                                      canRopeJump = True
-
-  eitherProposalCid <- submit recruiter do
-    exerciseCmd institution ReviewNewTalentProposal with
-      recruiter = recruiter
-      ..
-
-  let recruiterProposalCid = head $ rights [eitherProposalCid]
-
-  -- inspector can reject an application but cannot cancel
-  submitMustFail inspector do
-    exerciseCmd recruiterProposalCid CancelProposal with
-      requestor = inspector
-
-  pure ()
-
-
-testApprovedFlow : Script ()
-testApprovedFlow = script do
-
-  environmentParties@EnvironmentParties{..} <- setupParties
-
-  talentPropodalId <- submit talent do
-    createCmd TalentIntroductionProposal with
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-                     capabilities = TalentCapabilities with
-                                      canSwim = True
-                                      canDive = False
-                                      canHandstand = True
-                                      canWalkingOnHands = False
-                                      canRopeJump = True
-      talentRecruiter = recruiter
-      status = Applied
-      feedback = ""
-      ..
-
-  recruiterProposalId <- submit recruiter do
-    exerciseCmd talentPropodalId ApproveProposal with
-      inspector
-
-  needMoreInfoId <- submit inspector do
-    exerciseCmd recruiterProposalId RequestMoreInfo
+    nonconsuming choice CreateNewTalentProposal : TalentIntroductionProposalId
       with
-        feedback = "What is your special talent?"
+        talentInfo : TalentInfo
+        talentRecruiter : Party
+        student : Party
+      controller student
+        do
+          assertMsg "You must be a student" (student `elem` students)
+          assertMsg "You can only apply for yourself" (student == talentInfo.applicant)
+          assertMsg "You must request an authorized recruiter to review your application" (talentRecruiter `elem` recruiters)
 
-  revisedProposalId <- submit recruiter do
-    exerciseCmd needMoreInfoId ReviseProposal with
-      requestor = recruiter
-      feedback = "Can hold my breath under the water for 4 minutes"
+          create TalentIntroductionProposal
+            with
+              status = Applied
+              feedback = ""
+              ..
 
-  talentId <- submit inspector do
-    exerciseCmd revisedProposalId Approve
+    nonconsuming choice ReviewNewTalentProposal : Either TalentIntroductionProposalId TalentRecruiterProposalId
       with
-        feedback = "This is fantastic"
+        proposalCid : TalentIntroductionProposalId
+        recruiter : Party
+        inspector : Party
+      controller recruiter
+        do
+          assertMsg "You must be a recruiter" (recruiter `elem` recruiters)
+          assertMsg "The inspector must be registered" (inspector `elem` inspectors)
 
-  pure ()
+          proposal <- fetch proposalCid
+          assertMsg "You must be the recruiter that was orignally assigned to the application" (recruiter == proposal.talentRecruiter)
+
+          let
+            talentInfo = proposal.talentInfo
+            dive = if talentInfo.capabilities.canDive then 1 else 0
+            swim = if talentInfo.capabilities.canSwim then 1 else 0
+            handstand = if talentInfo.capabilities.canHandstand then 1 else 0
+            walkingOnHands = if talentInfo.capabilities.canWalkingOnHands then 1 else 0
+            ropeJump = if talentInfo.capabilities.canRopeJump then 1 else 0
+            score = dive + swim + handstand + walkingOnHands + ropeJump
+
+          if (score >= 3) then do
+                            recruiterProposalCid <- exercise proposalCid ApproveProposal with  ..
+                            return $ Right recruiterProposalCid
+                    else do
+                            introductionProposalCid <- exercise proposalCid RejectIntroductionProposal with reason = "Not enough talent, need to learb new capabilities"
+                            return $ Left introductionProposalCid
 
 
-testRejectedFlow : Script ()
-testRejectedFlow = script do
+template TalentIntroductionProposal
+  with
+    talentInfo : TalentInfo
+    talentRecruiter : Party
+    status : ProposalStatus
+    feedback : Text
+  where
+    signatory talentInfo.applicant
+    observer talentRecruiter
 
-  environmentParties@EnvironmentParties{..} <- setupParties
+    key (talentInfo.applicant, talentInfo) : (Party, TalentInfo)
+    maintainer key._1
 
-  talentPropodalId <- submit talent do
-    createCmd TalentIntroductionProposal with
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-                     capabilities = TalentCapabilities with
-                        canSwim = True
-                        canDive = False
-                        canHandstand = True
-                        canWalkingOnHands = False
-                        canRopeJump = True
-      talentRecruiter = recruiter
-      status = Applied
-      feedback = ""
-      ..
+    ensure (talentInfo.firstName /= "") && (talentInfo.age >= 18)
 
-  recruiterProposalId <- submit recruiter do
-    exerciseCmd talentPropodalId ApproveProposal with
-      inspector
-
-  needMoreInfoId <- submit inspector do
-    exerciseCmd recruiterProposalId RequestMoreInfo
+    choice RejectIntroductionProposal : TalentIntroductionProposalId
       with
-        feedback = "What is your special talent?"
+        reason : Text
+      controller talentRecruiter
+        do
+          assertMsg "The proposal cannot be rejected anymore" (status == Applied)
+          create this with
+            status = Rejected
+            feedback = reason
 
-  revisedProposalId <- submit recruiter do
-    exerciseCmd needMoreInfoId ReviseProposal with
-      requestor = recruiter
-      feedback = "Can hold my breath under the water for 4 minutes"
-
-  talentId <- submit inspector do
-    exerciseCmd revisedProposalId RejectApplicant
+    choice ApproveProposal : TalentRecruiterProposalId
       with
-        feedback = "This is not good enough"
+        inspector : Party
+      controller talentRecruiter
+        do
+          assertMsg "Cannot approve a proposal which is not in 'Applied' Status" (status == Applied)
 
-  pure ()
+          create TalentRecruiterProposal with
+            status = Applied
+            notes = []
+            ..
+
+    choice CancelIntroduction : ()
+      controller talentInfo.applicant
+        do
+          return ()
+
+template TalentRecruiterProposal
+  with
+    talentRecruiter : Party
+    inspector : Party
+    talentInfo : TalentInfo
+    status : ProposalStatus
+    notes : [Text]
+
+  where
+    signatory talentRecruiter, talentInfo.applicant
+    observer inspector
+
+    key (talentRecruiter, talentInfo) : (Party, TalentInfo)
+    maintainer key._1
+
+    ensure (talentInfo.firstName /= "") && (talentInfo.age >= 18)
+
+    choice CancelProposal : ()
+      with
+        requestor : Party
+      controller requestor
+        do
+          assertMsg "You are not authorized to cancel the proposal" ((requestor == talentRecruiter) || (requestor == talentInfo.applicant))
+          return ()
+
+    choice Approve : TalentId
+      with
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "You cannot approve the proposal at this time" (isProposalFinalized status)
+
+          create Talent with ..
+
+    choice RejectApplicant : TalentRecruiterProposalId
+      with
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "You cannot reject a proposal that was already approved" (isProposalFinalized status)
+          create this
+            with
+              notes = feedback :: notes
+              status = Rejected
+
+
+    choice RequestMoreInfo : TalentRecruiterProposalId
+      with
+        feedback : Text
+      controller inspector
+        do
+          assertMsg "The porposal cannot be revised anymore" (isProposalFinalized status)
+
+          create this
+            with
+              notes = feedback :: notes
+              status = NeedMoreInfo
+
+    choice ReviseProposal : TalentRecruiterProposalId
+      with
+        requestor : Party
+        feedback : Text
+      controller requestor
+        do
+          assertMsg "The porposal cannot be revised anymore" (isProposalFinalized status)
+          assertMsg "You are not authorized to revise this proposal" ((requestor == talentRecruiter) || (requestor == talentInfo.applicant))
+          create this
+            with
+              notes = feedback :: notes
+              status = Revised
+
+
+template Talent
+  with
+    inspector : Party
+    talentInfo : TalentInfo
+  where
+    signatory inspector, talentInfo.applicant
+
+    key (inspector, talentInfo) : (Party, TalentInfo)
+    maintainer key._1
 
