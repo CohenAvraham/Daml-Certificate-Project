@@ -4,44 +4,47 @@ import Daml.Script
 import Main
 
 data EnvironmentParties = EnvironmentParties with
+    manager: Party
     recruiter: Party
     inspector: Party
     talent: Party
+    recruiter2 : Party
 
 
 setupParties : Script EnvironmentParties
 setupParties = do
+  manager <- allocatePartyWithHint "Manager" (PartyIdHint "Manager")
   recruiter <- allocatePartyWithHint "Recruiter" (PartyIdHint "Recruiter")
+  recruiter2 <- allocatePartyWithHint "Recruiter2" (PartyIdHint "Recruiter2")
   inspector <- allocatePartyWithHint "Inspector" (PartyIdHint "Inspector")
   talent <- allocatePartyWithHint "Talent" (PartyIdHint "Talent")
 
+  managerId <- validateUserId "manager"
   recruiterId <- validateUserId "recruiter"
+  recruiter2Id <- validateUserId "recruiter2"
   inspectorId <- validateUserId "inspector"
   talentId <- validateUserId "talent"
 
+  createUser (User managerId (Some manager)) [CanActAs manager]
   createUser (User recruiterId (Some recruiter)) [CanActAs recruiter]
+  createUser (User recruiter2Id (Some recruiter2)) [CanActAs recruiter2]
   createUser (User inspectorId (Some inspector)) [CanActAs inspector]
   createUser (User talentId (Some talent)) [CanActAs talent]
-  
+
   return EnvironmentParties with ..
 
-initSetup : Script ()
+initSetup : Script (ContractId Institution, EnvironmentParties)
 initSetup = script do
 
   environmentParties@EnvironmentParties{..} <- setupParties
 
-  submit talent do
-    createCmd TalentIntroductionProposal with
-      talentInfo = TalentInfo with
-                     applicant = talent
-                     firstName = "Daml"
-                     lastName = "Certificate"
-                     age = 20
-                     additionalInfo = []
-      talentRecruiter = recruiter
-      status = Applied
-      feedback = ""
+  institution <- submit manager do
+    createCmd Institution with
+      students = [talent]
+      inspectors = [inspector]
+      recruiters = [recruiter]
       ..
 
-  return ()
-  
+  return (institution, environmentParties)
+
+
